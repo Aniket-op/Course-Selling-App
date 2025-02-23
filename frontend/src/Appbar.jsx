@@ -10,7 +10,7 @@ function Appbar() {
         padding: 4
     }}>
         <div>
-            <Typography variant={"h6"}>Coursera</Typography>
+            <Typography variant={"h6"}>Sell-Course</Typography>
         </div>
 
         <div style={{display: "flex"}}>

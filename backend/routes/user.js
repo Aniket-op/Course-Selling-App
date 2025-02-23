@@ -3,83 +3,119 @@ const { userModel, purchaseModel, courseModel } = require("../db");
 const jwt = require("jsonwebtoken");
 const { JWT_USER_PASSWORD } = require("../config");
 const { userMiddleware } = require("../middleware/user");
+const bcrypt = require("bcrypt");
+const { z } = require("zod");
 
 const userRouter = Router();
 
-userRouter.post("/signup", async function (req, res) {
-    const { email, password, firstName, lastName } = req.body; // TODO: adding zod validation
-    console.log(email + password + firstName + lastName);
+// Zod Schemas
+const signupSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(6),
+    firstName: z.string().min(1),
+    lastName: z.string().min(1)
+});
 
-    // TODO: hash the password so plaintext pw is not stored in the DB
+const signinSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(6)
+});
 
-    // TODO: Put inside a try catch block
+userRouter.post("/signup", async (req, res) => {
+    try {
+        // Validate request body
+        const validationResult = signupSchema.safeParse(req.body);
+        if (!validationResult.success) {
+            return res.status(400).json({
+                error: validationResult.error.errors.map(err => `${err.path.join(".")}: ${err.message}`)
+            });
+        }
 
-    await userModel.create({
-        email: email,
-        password: password,
-        firstName: firstName,
-        lastName: lastName
-    }).then(() => {
+        const { email, password, firstName, lastName } = validationResult.data;
+
+        // Check if user already exists
+        const existingUser = await userModel.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: "Email already taken" });
+        }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Create new user
+        const newUser = await userModel.create({
+            email,
+            password: hashedPassword,
+            firstName,
+            lastName
+        });
+
+        // Generate token
+        const token = jwt.sign({ id: newUser._id }, JWT_USER_PASSWORD);
+
         res.json({
-            message: "Signup succeeded"
-        })
-    }).catch((e)=>{
-        console.log(e);
-        
-    })
-
-
-})
-
-userRouter.post("/signin", async function (req, res) {
-    const { email, password } = req.body;
-
-    // TODO: ideally password should be hashed, and hence you cant compare the user provided password and the database password
-    const user = await userModel.findOne({
-        email: email,
-        password: password
-    }); //[]
-
-    if (user) {
-        const token = jwt.sign({
-            id: user._id,
-        }, JWT_USER_PASSWORD);
-
-        // Do cookie logic
-
-        res.json({
+            message: "User created successfully",
             token: token
-        })
-    } else {
-        res.status(403).json({
-            message: "Incorrect credentials"
-        })
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal server error" });
     }
-})
+});
 
-userRouter.get("/purchases", userMiddleware, async function (req, res) {
-    const userId = req.userId;
+userRouter.post("/signin", async (req, res) => {
+    try {
+        // Validate request body
+        const validationResult = signinSchema.safeParse(req.body);
+        if (!validationResult.success) {
+            return res.status(400).json({
+                error: validationResult.error.errors.map(err => err.message)
+            });
+        }
 
-    const purchases = await purchaseModel.find({
-        userId,
-    });
+        const { email, password } = validationResult.data;
 
-    let purchasedCourseIds = [];
+        // Find user
+        const user = await userModel.findOne({ email });
+        if (!user) {
+            return res.status(403).json({ message: "Incorrect credentials" });
+        }
 
-    for (let i = 0; i < purchases.length; i++) {
-        purchasedCourseIds.push(purchases[i].courseId)
+        // Verify password
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
+            return res.status(403).json({ message: "Incorrect credentials" });
+        }
+
+        // Generate token
+        const token = jwt.sign({ id: user._id }, JWT_USER_PASSWORD);
+
+        res.json({
+            message: "Successfully logged in",
+            token: token
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal server error" });
     }
+});
 
-    const coursesData = await courseModel.find({
-        _id: { $in: purchasedCourseIds }
-    })
+// Authenticated route
+userRouter.get("/purchases", userMiddleware, async (req, res) => {
+    try {
+        const userId = req.userId;
+        const purchases = await purchaseModel.find({ userId });
 
-    res.json({
-        purchases,
-        coursesData
-    })
-})
+        const purchasedCourseIds = purchases.map(purchase => purchase.courseId);
+        const coursesData = await courseModel.find({ _id: { $in: purchasedCourseIds } });
+
+        res.json({ purchases, coursesData });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
 
 module.exports = {
     userRouter: userRouter
-}
+};

@@ -3,7 +3,7 @@ import Signin from "./Signin.jsx";
 import Signup from "./Signup.jsx";
 import Appbar from "./Appbar.jsx";
 import AddCourse from "./AddCourse.jsx";
-
+import {Toaster} from "react-hot-toast";
 function App() {
 
     return (
@@ -13,6 +13,7 @@ function App() {
         >
             <Router>
                 <Appbar />
+                <Toaster position="top-center" />
                 <Routes>
                     <Route path={"/addcourse"} element={
                         <AddCourse />} />
